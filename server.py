@@ -4,6 +4,7 @@ import hmac
 import hashlib
 import json
 import base64
+import re
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import List, Optional
@@ -65,7 +66,7 @@ from pydantic import BaseModel
 
 # Load environment variables
 env_path = Path(__file__).resolve().parent / ".env"
-dotenv.load_dotenv(dotenv_path=env_path)
+dotenv.load_dotenv(dotenv_path=env_path, override=True)
 
 DB_FILE = os.getenv("LICENSE_DB", "./licenses.db")
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "w7J3z$kP8vB!Qf9u#Xn2%YhTmL4s@r1*")
@@ -79,40 +80,47 @@ if DATABASE_URL:
     DATABASE_URL = DATABASE_URL.strip()
     print(f"DEBUG: Original DATABASE_URL prefix: {DATABASE_URL[:30] if DATABASE_URL else None}")
     
-    import re
-    match = re.match(r"postgres(?:ql)?://([^:]+):([^@]+)@([^:/]+)(?::(\d+))?/(.+)", DATABASE_URL)
+    from urllib.parse import urlparse, quote
     urls_to_try = []
     
-    if match:
-        user, password, host, port, dbname = match.groups()
-        port = port or "5432"
+    try:
+        parsed = urlparse(DATABASE_URL)
+        user = parsed.username or "postgres"
+        password = quote(parsed.password) if parsed.password else ""
+        host = parsed.hostname
+        port = parsed.port or 5432
+        dbname = parsed.path.lstrip('/')
         
-        users = [user]
-        if user != "postgres":
-            users.append("postgres")
-            
-        dbnames = [dbname]
-        if dbname != "postgres":
-            dbnames.append("postgres")
-            
-        regions = ["us-east-1", "sa-east-1"]
-        
-        for u in users:
-            for db in dbnames:
-                # Direct connection
-                urls_to_try.append(f"postgresql://{u}:{password}@{host}:{port}/{db}")
+        if host:
+            users = [user]
+            if user != "postgres":
+                users.append("postgres")
                 
-                if "supabase.co" in host:
-                    project_ref = host.split(".")[0]
-                    pooler_user = f"{u}.{project_ref}" if "." not in u else u
+            dbnames = [dbname]
+            if dbname != "postgres":
+                dbnames.append("postgres")
+                
+            regions = ["us-east-1", "sa-east-1", "ca-central-1"]
+            
+            for u in users:
+                for db in dbnames:
+                    # Direct connection
+                    urls_to_try.append(f"postgresql://{u}:{password}@{host}:{port}/{db}")
                     
-                    # Same host pooler
-                    urls_to_try.append(f"postgresql://{pooler_user}:{password}@{host}:6543/{db}")
-                    
-                    # Regional pooler hosts
-                    for reg in regions:
-                        urls_to_try.append(f"postgresql://{pooler_user}:{password}@aws-0-{reg}.pooler.supabase.com:6543/{db}")
-    else:
+                    if "supabase.co" in host:
+                        project_ref = host.split(".")[0].lstrip("@")
+                        pooler_user = f"{u}.{project_ref}" if "." not in u else u
+                        
+                        # Same host pooler
+                        urls_to_try.append(f"postgresql://{pooler_user}:{password}@{host}:6543/{db}")
+                        
+                        # Regional pooler hosts
+                        for reg in regions:
+                            urls_to_try.append(f"postgresql://{pooler_user}:{password}@aws-0-{reg}.pooler.supabase.com:6543/{db}")
+        else:
+            urls_to_try.append(DATABASE_URL.replace("postgres://", "postgresql://", 1))
+    except Exception as e:
+        print(f"Erro ao analisar DATABASE_URL: {e}")
         urls_to_try.append(DATABASE_URL.replace("postgres://", "postgresql://", 1))
         
     for i, url in enumerate(urls_to_try):
