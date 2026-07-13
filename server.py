@@ -78,25 +78,57 @@ engine = None
 if DATABASE_URL:
     DATABASE_URL = DATABASE_URL.strip()
     print(f"DEBUG: Original DATABASE_URL prefix: {DATABASE_URL[:30] if DATABASE_URL else None}")
-    if DATABASE_URL.startswith("postgres://"):
-        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-    print(f"DEBUG: Modified DATABASE_URL prefix: {DATABASE_URL[:30] if DATABASE_URL else None}")
-    try:
-        print("Tentando conectar ao banco de dados PostgreSQL (Supabase)...")
-        engine = sa.create_engine(
-            DATABASE_URL, 
-            future=True, 
-            pool_pre_ping=True,
-            connect_args={"connect_timeout": 10}
-        )
-        # Testa a conexão
-        with engine.connect() as conn:
-            conn.execute(sa.text("SELECT 1"))
-        print("Conectado ao PostgreSQL com sucesso!")
-    except Exception as e:
-        print(f"Aviso: Não foi possível conectar ao PostgreSQL: {e}")
+    
+    import re
+    match = re.match(r"postgres(?:ql)?://([^:]+):([^@]+)@([^:/]+)(?::(\d+))?/(.+)", DATABASE_URL)
+    urls_to_try = []
+    
+    if match:
+        user, password, host, port, dbname = match.groups()
+        port = port or "5432"
+        
+        # 1. Direct or configured connection
+        urls_to_try.append(f"postgresql://{user}:{password}@{host}:{port}/{dbname}")
+        
+        # If it is a Supabase hostname, construct connection pooler variations
+        if "supabase.co" in host:
+            project_ref = host.split(".")[0]
+            pooler_user = f"{user}.{project_ref}" if "." not in user else user
+            
+            # 2. Connection pooler on port 6543 (same host)
+            urls_to_try.append(f"postgresql://{pooler_user}:{password}@{host}:6543/{dbname}")
+            
+            # 3. Connection pooler on port 6543 (AWS global pooler host)
+            urls_to_try.append(f"postgresql://{pooler_user}:{password}@aws-0-us-east-1.pooler.supabase.com:6543/{dbname}")
+            
+            # 4. Connection pooler on port 6543 (AWS global pooler host, default database 'postgres')
+            urls_to_try.append(f"postgresql://{pooler_user}:{password}@aws-0-us-east-1.pooler.supabase.com:6543/postgres")
+    else:
+        urls_to_try.append(DATABASE_URL.replace("postgres://", "postgresql://", 1))
+        
+    for i, url in enumerate(urls_to_try):
+        try:
+            # Mask password in console logs for security
+            masked_url = re.sub(r":[^@]+@", ":****@", url)
+            print(f"Tentando conectar ao PostgreSQL (Estratégia {i+1}/4): {masked_url[:65]}...")
+            
+            engine = sa.create_engine(
+                url, 
+                future=True, 
+                pool_pre_ping=True,
+                connect_args={"connect_timeout": 5}
+            )
+            # Test connection
+            with engine.connect() as conn:
+                conn.execute(sa.text("SELECT 1"))
+            print("Conectado ao PostgreSQL com sucesso!")
+            break
+        except Exception as e:
+            print(f"Aviso: Estratégia {i+1} falhou: {e}")
+            engine = None
+            
+    if engine is None:
         print("Fazendo fallback para banco de dados SQLite local...")
-        engine = None
 
 if engine is None:
     engine = sa.create_engine(f"sqlite:///{DB_FILE}", future=True, connect_args={"check_same_thread": False})
@@ -363,10 +395,27 @@ async def toggle_key(product_key: str, request: Request, body: dict, db: Session
     db.commit()
     return {"success": True}
 
-# Root route
 @app.get("/")
-async def root():
-    return {"message": "Servidor Unificado RemBG Automation está ativo"}
+async def root(db: Session = Depends(get_db)):
+    try:
+        result = db.execute(sa.text("""
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            ORDER BY table_name;
+        """))
+        tables = [row[0] for row in result.fetchall()]
+        return {
+            "message": "Servidor Unificado RemBG Automation está ativo",
+            "tables_in_db": tables,
+            "database_url_prefix": os.getenv("DATABASE_URL")[:35] if os.getenv("DATABASE_URL") else None
+        }
+    except Exception as e:
+        return {
+            "message": "Servidor Unificado RemBG Automation está ativo",
+            "error_checking_tables": str(e),
+            "database_url_prefix": os.getenv("DATABASE_URL")[:35] if os.getenv("DATABASE_URL") else None
+        }
 
 if __name__ == "__main__":
     import uvicorn
