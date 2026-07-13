@@ -79,16 +79,15 @@ if DATABASE_URL:
     DATABASE_URL = DATABASE_URL.strip()
     print(f"DEBUG: Original DATABASE_URL prefix: {DATABASE_URL[:30] if DATABASE_URL else None}")
     if DATABASE_URL.startswith("postgres://"):
-        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+pg8000://", 1)
-    elif DATABASE_URL.startswith("postgresql://"):
-        DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+pg8000://", 1)
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
     print(f"DEBUG: Modified DATABASE_URL prefix: {DATABASE_URL[:30] if DATABASE_URL else None}")
     try:
         print("Tentando conectar ao banco de dados PostgreSQL (Supabase)...")
         engine = sa.create_engine(
             DATABASE_URL, 
             future=True, 
-            pool_pre_ping=True
+            pool_pre_ping=True,
+            connect_args={"connect_timeout": 10}
         )
         # Testa a conexão
         with engine.connect() as conn:
@@ -119,7 +118,10 @@ class ProductKey(Base):
 
 # Initialize database
 def init_db():
-    Base.metadata.create_all(bind=engine)
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        print(f"Aviso: Falha ao verificar/criar tabelas: {e}")
 
 init_db()
 

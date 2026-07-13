@@ -2,4 +2,4 @@ fastapi
 python-dotenv
 pydantic
 SQLAlchemy
-pg8000
+psycopg2-binary
