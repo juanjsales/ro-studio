@@ -87,22 +87,31 @@ if DATABASE_URL:
         user, password, host, port, dbname = match.groups()
         port = port or "5432"
         
-        # 1. Direct or configured connection
-        urls_to_try.append(f"postgresql://{user}:{password}@{host}:{port}/{dbname}")
+        users = [user]
+        if user != "postgres":
+            users.append("postgres")
+            
+        dbnames = [dbname]
+        if dbname != "postgres":
+            dbnames.append("postgres")
+            
+        regions = ["us-east-1", "sa-east-1"]
         
-        # If it is a Supabase hostname, construct connection pooler variations
-        if "supabase.co" in host:
-            project_ref = host.split(".")[0]
-            pooler_user = f"{user}.{project_ref}" if "." not in user else user
-            
-            # 2. Connection pooler on port 6543 (same host)
-            urls_to_try.append(f"postgresql://{pooler_user}:{password}@{host}:6543/{dbname}")
-            
-            # 3. Connection pooler on port 6543 (AWS global pooler host)
-            urls_to_try.append(f"postgresql://{pooler_user}:{password}@aws-0-us-east-1.pooler.supabase.com:6543/{dbname}")
-            
-            # 4. Connection pooler on port 6543 (AWS global pooler host, default database 'postgres')
-            urls_to_try.append(f"postgresql://{pooler_user}:{password}@aws-0-us-east-1.pooler.supabase.com:6543/postgres")
+        for u in users:
+            for db in dbnames:
+                # Direct connection
+                urls_to_try.append(f"postgresql://{u}:{password}@{host}:{port}/{db}")
+                
+                if "supabase.co" in host:
+                    project_ref = host.split(".")[0]
+                    pooler_user = f"{u}.{project_ref}" if "." not in u else u
+                    
+                    # Same host pooler
+                    urls_to_try.append(f"postgresql://{pooler_user}:{password}@{host}:6543/{db}")
+                    
+                    # Regional pooler hosts
+                    for reg in regions:
+                        urls_to_try.append(f"postgresql://{pooler_user}:{password}@aws-0-{reg}.pooler.supabase.com:6543/{db}")
     else:
         urls_to_try.append(DATABASE_URL.replace("postgres://", "postgresql://", 1))
         
@@ -110,7 +119,7 @@ if DATABASE_URL:
         try:
             # Mask password in console logs for security
             masked_url = re.sub(r":[^@]+@", ":****@", url)
-            print(f"Tentando conectar ao PostgreSQL (Estratégia {i+1}/4): {masked_url[:65]}...")
+            print(f"Tentando conectar ao PostgreSQL (Estratégia {i+1}/{len(urls_to_try)}): {masked_url[:65]}...")
             
             engine = sa.create_engine(
                 url, 
