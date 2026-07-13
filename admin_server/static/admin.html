@@ -2,35 +2,98 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <title>Administração de Licenças – RemBG Automation</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Painel Administrativo – Rô Studio</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="admin.css">
 </head>
 <body>
-  <div class="glass-card">
-    <h1>Gerador de Licenças</h1>
-    <form id="keyForm">
-      <label for="tier">Tipo (Tier)</label>
-      <select id="tier" name="tier">
-        <option value="basic">Basic</option>
-        <option value="pro">Pro</option>
-        <option value="enterprise">Enterprise</option>
-      </select>
-      <label for="duration">Duração (dias)</label>
-      <input type="number" id="duration" name="duration_days" min="1" value="30"/>
-      <label class="checkbox-label">
-        <input type="checkbox" id="active" name="is_active" checked/>
-        Ativa
-      </label>
-      <button type="submit" class="cta-button">Gerar Chave</button>
-    </form>
-    <div id="result" class="hidden">
-      <p>Chave Gerada:</p>
-      <code id="generatedKey" class="key-output"></code>
-      <button id="copyBtn" class="copy-button">Copiar</button>
-    </div>
+  <div class="app-container">
+    <!-- Header de Autenticação -->
+    <header class="dashboard-header glass-card">
+      <div class="logo-area">
+        <span class="logo-icon">🔑</span>
+        <div class="logo-text">
+          <h1>Rô Studio</h1>
+          <p>Licenciamento & Ativação</p>
+        </div>
+      </div>
+      <div class="auth-area">
+        <div class="input-wrapper">
+          <input type="password" id="adminTokenInput" placeholder="Digite o Admin Token..." />
+          <span class="status-indicator" id="authStatus">Desconectado</span>
+        </div>
+        <button id="authBtn" class="btn primary-btn">Entrar</button>
+      </div>
+    </header>
+
+    <!-- Conteúdo Principal -->
+    <main class="dashboard-content">
+      <!-- Card de Gerar Chave -->
+      <section class="glass-card generator-section">
+        <h2>Gerador de Licenças</h2>
+        <form id="keyForm">
+          <div class="form-group">
+            <label for="tier">Tipo de Licença (Tier)</label>
+            <select id="tier" name="tier">
+              <option value="basic">Basic (Básico)</option>
+              <option value="pro" selected>Pro (Profissional)</option>
+              <option value="enterprise">Enterprise (Corporativo)</option>
+            </select>
+          </div>
+          
+          <div class="form-group">
+            <label for="duration">Duração (dias)</label>
+            <input type="number" id="duration" name="duration_days" min="1" value="365" required />
+          </div>
+          
+          <div class="form-group checkbox-group">
+            <input type="checkbox" id="active" name="is_active" checked />
+            <label for="active" class="checkbox-label">Ativar licença imediatamente</label>
+          </div>
+          
+          <button type="submit" class="btn action-btn">Gerar Chave</button>
+        </form>
+
+        <div id="result" class="result-box hidden">
+          <p class="result-title">Chave Gerada com Sucesso</p>
+          <div class="key-display-wrapper">
+            <code id="generatedKey" class="key-output"></code>
+            <button id="copyBtn" class="btn copy-btn">Copiar</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Lista de Chaves Geradas -->
+      <section class="glass-card list-section">
+        <div class="section-header">
+          <h2>Licenças Cadastradas</h2>
+          <button id="refreshBtn" class="btn secondary-btn small-btn">Atualizar Lista</button>
+        </div>
+        <div class="table-wrapper">
+          <table id="keyTable" class="key-table">
+            <thead>
+              <tr>
+                <th>Chave de Produto</th>
+                <th>Tier</th>
+                <th>Duração</th>
+                <th>Status</th>
+                <th>Máquina Vinculada</th>
+                <th>Data Criação</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td colspan="7" class="empty-state">Insira o Admin Token para carregar as licenças.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
   </div>
   <script src="admin.js"></script>
 </body>
