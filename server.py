@@ -1,10 +1,58 @@
 import os
 import uuid
-import jwt
+import hmac
+import hashlib
+import json
+import base64
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import List, Optional
 import dotenv
+
+class InvalidTokenError(Exception):
+    pass
+
+def base64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode('utf-8').rstrip('=')
+
+def base64url_decode(data: str) -> bytes:
+    padding = '=' * (4 - (len(data) % 4))
+    return base64.urlsafe_b64decode(data + padding)
+
+def jwt_encode(payload: dict, key: str) -> str:
+    clean_payload = {}
+    for k, v in payload.items():
+        if isinstance(v, datetime):
+            clean_payload[k] = int(v.timestamp())
+        else:
+            clean_payload[k] = v
+            
+    header = {"alg": "HS256", "typ": "JWT"}
+    header_json = json.dumps(header, separators=(',', ':')).encode('utf-8')
+    payload_json = json.dumps(clean_payload, separators=(',', ':')).encode('utf-8')
+    
+    signing_input = base64url_encode(header_json) + "." + base64url_encode(payload_json)
+    
+    signature = hmac.new(key.encode('utf-8'), signing_input.encode('utf-8'), hashlib.sha256).digest()
+    return signing_input + "." + base64url_encode(signature)
+
+def jwt_decode(token: str, key: str) -> dict:
+    parts = token.split('.')
+    if len(parts) != 3:
+        raise InvalidTokenError("Token JWT inválido: formato incorreto")
+        
+    try:
+        signing_input = parts[0] + "." + parts[1]
+        signature_received = base64url_decode(parts[2])
+        
+        signature_expected = hmac.new(key.encode('utf-8'), signing_input.encode('utf-8'), hashlib.sha256).digest()
+        if not hmac.compare_digest(signature_received, signature_expected):
+            raise InvalidTokenError("Assinatura do token inválida")
+            
+        payload_json = base64url_decode(parts[1])
+        return json.loads(payload_json.decode('utf-8'))
+    except Exception as e:
+        raise InvalidTokenError(f"Falha ao decodificar: {e}")
 import sqlalchemy as sa
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from sqlalchemy import Column, Integer, String, Boolean, DateTime
@@ -28,16 +76,19 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 engine = None
 
 if DATABASE_URL:
+    DATABASE_URL = DATABASE_URL.strip()
+    print(f"DEBUG: Original DATABASE_URL prefix: {DATABASE_URL[:30] if DATABASE_URL else None}")
     if DATABASE_URL.startswith("postgres://"):
-        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+pg8000://", 1)
+    elif DATABASE_URL.startswith("postgresql://"):
+        DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+pg8000://", 1)
+    print(f"DEBUG: Modified DATABASE_URL prefix: {DATABASE_URL[:30] if DATABASE_URL else None}")
     try:
         print("Tentando conectar ao banco de dados PostgreSQL (Supabase)...")
-        # Usamos timeout de 5 segundos para evitar travamento em redes sem IPv6
         engine = sa.create_engine(
             DATABASE_URL, 
             future=True, 
-            pool_pre_ping=True, 
-            connect_args={"connect_timeout": 5}
+            pool_pre_ping=True
         )
         # Testa a conexão
         with engine.connect() as conn:
@@ -143,7 +194,7 @@ async def activate_license(payload: ActivateRequest, db: Session = Depends(get_d
         "iat": datetime.now(timezone.utc),
         "exp": exp_time
     }
-    token = jwt.encode(token_payload, JWT_SECRET_KEY, algorithm="HS256")
+    token = jwt_encode(token_payload, JWT_SECRET_KEY)
 
     print(f"Chave '{product_key}' ativada com sucesso para a máquina '{machine_id[:10]}...'. Token gerado.")
     return {"success": True, "token": token}
@@ -158,7 +209,7 @@ async def refresh_token(request: Request, db: Session = Depends(get_db)):
 
     try:
         # Decode but ignore expiration so we can renew expired licenses
-        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=["HS256"], options={"verify_exp": False})
+        payload = jwt_decode(token, JWT_SECRET_KEY)
         
         sub = payload.get("sub", "")
         if not sub.startswith("user_"):
@@ -189,12 +240,12 @@ async def refresh_token(request: Request, db: Session = Depends(get_db)):
             "iat": datetime.now(timezone.utc),
             "exp": expiration
         }
-        new_token = jwt.encode(new_payload, JWT_SECRET_KEY, algorithm="HS256")
+        new_token = jwt_encode(new_payload, JWT_SECRET_KEY)
         
         print(f"Token renovado com sucesso para o usuário '{sub}'.")
         return {"success": True, "token": new_token}
 
-    except jwt.InvalidTokenError as e:
+    except InvalidTokenError as e:
         return JSONResponse(status_code=401, content={"success": False, "message": f"Token inválido: {e}"})
 
 # Backward compatibility / verify endpoint
@@ -220,7 +271,7 @@ async def verify_license(request: Request, db: Session = Depends(get_db)):
         "exp": expiration,
         "iat": datetime.now(timezone.utc)
     }
-    token = jwt.encode(payload, JWT_SECRET_KEY, algorithm="HS256")
+    token = jwt_encode(payload, JWT_SECRET_KEY)
     return {"success": True, "message": "Licença válida", "tier": db_key.tier, "token": token}
 
 # ---------- Admin routes ----------

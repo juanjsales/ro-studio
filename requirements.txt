@@ -1,7 +1,5 @@
 fastapi
-uvicorn[standard]
 python-dotenv
 pydantic
-pyjwt
-sqlalchemy
-psycopg2-binary
+SQLAlchemy
+pg8000
